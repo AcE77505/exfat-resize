@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: MIT
+name: Build arm64 static ELF
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install arm64 cross-compilation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            cmake \
+            make
+
+      - name: Configure CMake for arm64 static build
+        run: |
+          cmake -S . -B build-arm64-static \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEXFAT_RESIZE_BUILD_CLI=ON \
+            -DEXFAT_RESIZE_BUILD_TESTS=OFF \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_C_FLAGS="-static -Os -s"
+
+      - name: Build exfat-resize (arm64 static)
+        run: |
+          cmake --build build-arm64-static --parallel
+
+      - name: Verify the binary
+        run: |
+          file build-arm64-static/exfat-resize
+          aarch64-linux-gnu-readelf -h build-arm64-static/exfat-resize | grep -E "(Machine|Class)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: exfat-resize-arm64-static
+          path: build-arm64-static/exfat-resize
+          if-no-files-found: error
