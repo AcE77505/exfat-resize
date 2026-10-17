@@ -46,7 +46,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND MSVC)
         ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
         ${PROJECT_SOURCE_DIR}/src/windows/entry.c
         ${PROJECT_SOURCE_DIR}/src/windows/partition.c
+        ${PROJECT_SOURCE_DIR}/src/windows/partition_layout.c
+        ${PROJECT_SOURCE_DIR}/src/windows/partition_shrink.c
         windows-partition-fault.c
+        shrink-compaction-monitor.c
     )
     target_include_directories(
         exfat_resize_partition_fault_test
@@ -69,7 +72,90 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND MSVC)
     exfat_resize_configure_target(exfat_resize_partition_fault_test)
 endif()
 
+add_executable(
+    exfat_resize_cli_cancellation_test
+    cli-cancellation.c
+    ${PROJECT_SOURCE_DIR}/tests/library/support/exfat_fixture.c
+    ${PROJECT_SOURCE_DIR}/tests/library/support/shrink_fixture.c
+    ${PROJECT_SOURCE_DIR}/tests/library/support/memory_block_device.c
+    ${PROJECT_SOURCE_DIR}/src/cli.c
+)
+target_include_directories(
+    exfat_resize_cli_cancellation_test
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/lib
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tests/library
+)
+target_compile_definitions(
+    exfat_resize_cli_cancellation_test
+    PRIVATE
+        EXFAT_RESIZE_BUILD_VERSION="${EXFAT_RESIZE_BUILD_VERSION}-cancellation-test"
+)
+target_link_libraries(exfat_resize_cli_cancellation_test PRIVATE exfat_resize)
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_sources(
+        exfat_resize_cli_cancellation_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src/windows/device_path.c
+    )
+endif()
+exfat_resize_configure_target(exfat_resize_cli_cancellation_test)
+add_test(
+    NAME cli.cancellation
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DPROGRAM=$<TARGET_FILE:exfat_resize_cli_cancellation_test>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cli-cancellation-test.cmake"
+)
+set_tests_properties(cli.cancellation PROPERTIES LABELS cli)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    add_library(
+        exfat_resize_windows_entry_test_object
+        OBJECT
+            ${PROJECT_SOURCE_DIR}/src/windows/entry.c
+    )
+    target_include_directories(
+        exfat_resize_windows_entry_test_object
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+    )
+    target_compile_definitions(
+        exfat_resize_windows_entry_test_object
+        PRIVATE
+            wmain=exfat_resize_test_windows_entry
+    )
+    if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+        target_compile_options(
+            exfat_resize_windows_entry_test_object
+            PRIVATE
+                "/FI${CMAKE_CURRENT_SOURCE_DIR}/windows-entry-api-redirect.h"
+        )
+    else()
+        target_compile_options(
+            exfat_resize_windows_entry_test_object
+            PRIVATE
+                -include
+                "${CMAKE_CURRENT_SOURCE_DIR}/windows-entry-api-redirect.h"
+        )
+    endif()
+    exfat_resize_configure_target(exfat_resize_windows_entry_test_object)
+
+    add_executable(
+        exfat_resize_windows_entry_test
+        windows-entry.c
+        $<TARGET_OBJECTS:exfat_resize_windows_entry_test_object>
+    )
+    target_include_directories(
+        exfat_resize_windows_entry_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+    )
+    exfat_resize_configure_target(exfat_resize_windows_entry_test)
+    add_test(NAME cli.windows-entry COMMAND exfat_resize_windows_entry_test)
+    set_tests_properties(cli.windows-entry PROPERTIES LABELS cli)
+
     add_executable(
         exfat_resize_windows_device_path_test
         windows-device-path.c
@@ -104,7 +190,77 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         )
         set_tests_properties(cli.${test_case} PROPERTIES LABELS cli)
     endforeach()
+
+    add_executable(
+        exfat_resize_windows_image_fixture
+        windows-image-fixture.c
+        ${PROJECT_SOURCE_DIR}/tests/library/support/exfat_fixture.c
+        ${PROJECT_SOURCE_DIR}/tests/library/support/memory_block_device.c
+    )
+    target_include_directories(
+        exfat_resize_windows_image_fixture
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/lib
+            ${PROJECT_SOURCE_DIR}/tests/library
+    )
+    target_link_libraries(exfat_resize_windows_image_fixture PRIVATE exfat_resize)
+    exfat_resize_configure_target(exfat_resize_windows_image_fixture)
+    add_test(
+        NAME cli.windows-image-partition-options
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DPROGRAM=$<TARGET_FILE:exfat-resize>"
+            "-DFIXTURE_PROGRAM=$<TARGET_FILE:exfat_resize_windows_image_fixture>"
+            -DTEST_CASE=partition-options
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/windows-command-test.cmake"
+    )
+    set_tests_properties(cli.windows-image-partition-options PROPERTIES LABELS cli)
     return()
+endif()
+
+add_library(
+    exfat_resize_posix_entry_test_object
+    OBJECT
+        ${PROJECT_SOURCE_DIR}/src/posix/entry.c
+)
+target_include_directories(
+    exfat_resize_posix_entry_test_object
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+)
+target_compile_definitions(
+    exfat_resize_posix_entry_test_object
+    PRIVATE
+        main=exfat_resize_test_posix_entry
+)
+exfat_resize_configure_target(exfat_resize_posix_entry_test_object)
+
+add_executable(
+    exfat_resize_posix_entry_test
+    posix-entry.c
+    $<TARGET_OBJECTS:exfat_resize_posix_entry_test_object>
+)
+target_include_directories(
+    exfat_resize_posix_entry_test
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+)
+exfat_resize_configure_target(exfat_resize_posix_entry_test)
+add_test(NAME cli.posix-entry COMMAND exfat_resize_posix_entry_test)
+set_tests_properties(cli.posix-entry PROPERTIES LABELS cli)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    add_executable(exfat_resize_macos_device_sync_test macos-device-sync.c)
+    target_include_directories(
+        exfat_resize_macos_device_sync_test
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/lib
+            ${PROJECT_SOURCE_DIR}/src
+    )
+    target_link_libraries(exfat_resize_macos_device_sync_test PRIVATE exfat_resize)
+    exfat_resize_configure_target(exfat_resize_macos_device_sync_test)
+    add_test(NAME cli.macos-device-sync COMMAND exfat_resize_macos_device_sync_test)
+    set_tests_properties(cli.macos-device-sync PROPERTIES LABELS cli)
 endif()
 
 exfat_resize_add_device_test(
@@ -135,11 +291,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_C_COMPILER_ID MATCHES "Clang|GNU
     )
 endif()
 
+add_executable(exfat_resize_directory_metadata directory-metadata.c)
+exfat_resize_configure_target(exfat_resize_directory_metadata)
+
 set(
     EXFAT_RESIZE_CLI_TEST_SCRIPTS
     help.sh
     recovery-guidance.sh
     grow-image.sh
+    shrink-image.sh
     preserve-data.sh
     explicit-size.sh
     sector-size.sh
@@ -157,6 +317,7 @@ foreach(script IN LISTS EXFAT_RESIZE_CLI_TEST_SCRIPTS)
         COMMAND
             ${CMAKE_COMMAND} -E env
                 "DEVICE_LOCK_TEST=$<TARGET_FILE:exfat_resize_device_lock_test>"
+                "DIRECTORY_METADATA_TEST=$<TARGET_FILE:exfat_resize_directory_metadata>"
                 "${CMAKE_CURRENT_SOURCE_DIR}/${script}"
                 "$<TARGET_FILE:exfat-resize>"
     )
@@ -167,3 +328,14 @@ foreach(script IN LISTS EXFAT_RESIZE_CLI_TEST_SCRIPTS)
             SKIP_RETURN_CODE 77
     )
 endforeach()
+
+add_test(
+    NAME cli.shrink-image-4096
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+            "FILESYSTEM_SECTOR_SIZE=4096"
+            "DIRECTORY_METADATA_TEST=$<TARGET_FILE:exfat_resize_directory_metadata>"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shrink-image.sh"
+            "$<TARGET_FILE:exfat-resize>"
+)
+set_tests_properties(cli.shrink-image-4096 PROPERTIES LABELS cli SKIP_RETURN_CODE 77)

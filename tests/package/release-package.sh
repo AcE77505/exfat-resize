@@ -6,7 +6,6 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 cmake_command=${CMAKE:-cmake}
 ctest_command=${CTEST:-ctest}
-make_command=${MAKE:-make}
 temporary=${TMPDIR:-/tmp}/exfat-resize-release-test.$$
 
 cleanup() {
@@ -19,7 +18,7 @@ build_consumer() {
 	"$cmake_command" -S "$project_root/tests/package/consumer" \
 		-B "$temporary/$name" "$@"
 	"$cmake_command" --build "$temporary/$name" --parallel
-	"$ctest_command" --test-dir "$temporary/$name" --output-on-failure
+	"$ctest_command" --test-dir "$temporary/$name" --output-on-failure --no-tests=error
 }
 
 expect_version_rejected() {
@@ -46,7 +45,7 @@ mkdir -p "$temporary"
 
 cd "$project_root"
 git status --short --untracked-files=all >"$temporary/status.before"
-"$make_command" dist
+CMAKE="$cmake_command" sh tools/make-dist.sh
 
 package_version=$(cat build/dist/package-version)
 build_version=$(cat build/dist/build-version)
@@ -72,7 +71,7 @@ if [ "$dirty_cli_version" != "exfat-resize $build_version-dirty" ]; then
 fi
 (
 	cd "$temporary/dirty-helper-repository"
-	"$make_command" dist
+	CMAKE="$cmake_command" sh tools/make-dist.sh
 )
 dirty_archive=$temporary/dirty-helper-repository/$archive
 dirty_source=$temporary/dirty-source
@@ -126,6 +125,12 @@ cmp "$source_tree/CONTRIBUTING.md" \
 	"$temporary/prefix/share/doc/exfat_resize/CONTRIBUTING.md"
 cmp "$source_tree/LICENSE" "$temporary/prefix/share/doc/exfat_resize/LICENSE"
 cmp "$source_tree/README.md" "$temporary/prefix/share/doc/exfat_resize/README.md"
+cmp "$source_tree/docs/LIBRARY.md" \
+	"$temporary/prefix/share/doc/exfat_resize/docs/LIBRARY.md"
+cmp "$source_tree/docs/PARTITIONING.md" \
+	"$temporary/prefix/share/doc/exfat_resize/docs/PARTITIONING.md"
+cmp "$source_tree/docs/TRANSACTION.md" \
+	"$temporary/prefix/share/doc/exfat_resize/docs/TRANSACTION.md"
 installed_cli_version=$("$temporary/prefix/bin/exfat-resize" --version)
 if [ "$installed_cli_version" != "exfat-resize $build_version" ]; then
 	echo "installed CLI version disagrees with build version" >&2

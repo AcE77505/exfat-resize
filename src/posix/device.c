@@ -156,8 +156,9 @@ int device_open(struct device *device, const char *path, char *error, size_t err
 		bytes = blocks * (uint64_t)sector_size;
 #elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
 		int logical_size;
+		/* Linux uses the low 32 request bits; musl declares the request parameter as int. */
 		if (ioctl(fd, BLKSSZGET, &logical_size) != 0 || logical_size <= 0 ||
-		    ioctl(fd, BLKGETSIZE64, &bytes) != 0) {
+		    ioctl(fd, (int)BLKGETSIZE64, &bytes) != 0) {
 			set_error(error, error_size, path);
 			goto fail_after_open;
 		}
@@ -192,19 +193,21 @@ fail_after_open:
 	return -1;
 }
 
-int device_grow_partition(struct device *device,
+enum device_partition_growth_result device_grow_partition(struct device *device,
     const char *path,
     uint64_t target_size,
+    const struct cli_cancellation *cancellation,
     enum device_partition_state *partition_state,
     char *error,
     size_t error_size)
 {
 	(void)device;
 	(void)target_size;
+	(void)cancellation;
 	*partition_state = DEVICE_PARTITION_UNCHANGED;
 	(void)snprintf(error, error_size,
 	    "%s: --grow-partition is supported only for logical Windows volumes", path);
-	return -1;
+	return DEVICE_PARTITION_GROWTH_ERROR;
 }
 
 int device_dismount(struct device *device, const char *path, char *error, size_t error_size)
@@ -287,13 +290,18 @@ static int block_device_sync(void *context)
 			result = fcntl(device->fd, F_FULLFSYNC);
 		} while (result != 0 && errno == EINTR);
 	} else {
-		dk_synchronize_t request = {
-			.offset = 0, .length = 0, .options = DK_SYNCHRONIZE_OPTION_BARRIER
-		};
+		dk_synchronize_t request = { .offset = 0, .length = 0, .options = 0 };
 
+		/* Drain buffered block nodes first; fsync is a no-op on raw character nodes. */
 		do {
-			result = ioctl(device->fd, DKIOCSYNCHRONIZE, &request);
+			result = fsync(device->fd);
 		} while (result != 0 && errno == EINTR);
+		if (result == 0) {
+			/* A write barrier only orders writes; request a full media flush. */
+			do {
+				result = ioctl(device->fd, DKIOCSYNCHRONIZE, &request);
+			} while (result != 0 && errno == EINTR);
+		}
 	}
 #elif defined(EXFAT_RESIZE_PLATFORM_LINUX)
 	do {

@@ -37,6 +37,10 @@ struct memory_block_device {
 	size_t operation_capacity;
 	size_t operation_index;
 
+	/* First invalid callback; ordinary log and failure resets do not clear it. */
+	const char *contract_error;
+	struct memory_operation contract_error_operation;
+
 	int failure_enabled;
 	enum memory_failure_mode failure_mode;
 	size_t failing_operation;
@@ -47,7 +51,8 @@ struct memory_block_device {
 void memory_block_device_init(
     struct memory_block_device *memory, uint32_t sector_size, uint64_t sector_count);
 
-void memory_block_device_destroy(struct memory_block_device *memory);
+/* Always frees and resets the device; returns EINVAL for a recorded contract error, else 0. */
+int memory_block_device_destroy(struct memory_block_device *memory);
 void memory_block_device_clear_operations(struct memory_block_device *memory);
 
 void memory_block_device_fail_operation(
@@ -61,6 +66,9 @@ void memory_block_device_fail_after_operation(struct memory_block_device *memory
 void memory_block_device_clear_failure(struct memory_block_device *memory);
 
 int memory_block_device_make_durable(struct memory_block_device *memory);
+/* Persist selected current sectors without a sync, to model writeback before a crash. */
+int memory_block_device_persist_range(
+    struct memory_block_device *memory, uint64_t first_sector, uint32_t sector_count);
 int memory_block_device_crash(struct memory_block_device *memory);
 
 #endif

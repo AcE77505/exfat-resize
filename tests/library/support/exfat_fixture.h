@@ -29,16 +29,29 @@ static inline uint64_t exfat_fixture_target_size(uint64_t target_sector_count)
 static inline enum exfat_resize_error exfat_fixture_resize(
     const struct exfat_resize_block_device *device,
     uint64_t target_sector_count,
-    const struct exfat_resize_options *options,
+    const struct exfat_resize_allocator *allocator,
     enum exfat_resize_stage *stage)
 {
-	return exfat_resize(device, exfat_fixture_target_size(target_sector_count), options, stage);
+	return exfat_resize(
+	    device, exfat_fixture_target_size(target_sector_count), allocator, NULL, stage);
+}
+
+static inline enum exfat_resize_error exfat_fixture_resize_with_monitor(
+    const struct exfat_resize_block_device *device,
+    uint64_t target_sector_count,
+    const struct exfat_resize_allocator *allocator,
+    const struct exfat_resize_monitor *monitor,
+    enum exfat_resize_stage *stage)
+{
+	return exfat_resize(
+	    device, exfat_fixture_target_size(target_sector_count), allocator, monitor, stage);
 }
 
 int exfat_fixture_initialize(struct exfat_fixture *fixture, uint64_t device_sector_count);
 int exfat_fixture_initialize_with_sectors_per_cluster(
     struct exfat_fixture *fixture, uint64_t device_sector_count, uint32_t sectors_per_cluster);
-void exfat_fixture_destroy(struct exfat_fixture *fixture);
+/* Always frees and resets the fixture; returns the memory device's contract status. */
+int exfat_fixture_destroy(struct exfat_fixture *fixture);
 int exfat_fixture_write_boot_regions(struct exfat_fixture *fixture);
 
 int exfat_fixture_add_child_directories(

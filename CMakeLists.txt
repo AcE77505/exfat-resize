@@ -54,17 +54,44 @@ if(EXFAT_RESIZE_BUILD_CLI AND NOT EXFAT_RESIZE_CLI_SUPPORTED)
 endif()
 
 set(EXFAT_RESIZE_BUILD_VERSION "${PROJECT_VERSION}-unknown")
+set(EXFAT_RESIZE_INSTALL_MANPAGE OFF)
 if(EXFAT_RESIZE_BUILD_CLI)
-    exfat_resize_resolve_checkout_build_version(
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${PROJECT_VERSION}"
-        EXFAT_RESIZE_BUILD_VERSION
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        set(EXFAT_RESIZE_INSTALL_MANPAGE ON)
+    endif()
+    set(EXFAT_RESIZE_VERSION_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+    set(EXFAT_RESIZE_VERSION_BINARY_DIR "${PROJECT_BINARY_DIR}")
+    # Seed installable outputs at configure time; refresh Git identity on builds too.
+    include(cmake/ExfatResizeBuildVersion.cmake)
+    set(exfat_resize_version_outputs
+        "${PROJECT_BINARY_DIR}/exfat_resize_build_version.h"
+        "${PROJECT_BINARY_DIR}/exfat_resize_build_version.cmake"
+    )
+    if(EXFAT_RESIZE_INSTALL_MANPAGE)
+        list(APPEND exfat_resize_version_outputs "${PROJECT_BINARY_DIR}/exfat-resize.8")
+    endif()
+    add_custom_target(
+        exfat_resize_build_version
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DEXFAT_RESIZE_VERSION_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DEXFAT_RESIZE_VERSION_BINARY_DIR=${PROJECT_BINARY_DIR}"
+            "-DEXFAT_RESIZE_INSTALL_MANPAGE=${EXFAT_RESIZE_INSTALL_MANPAGE}"
+            "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+            "-DCMAKE_DISABLE_FIND_PACKAGE_Git=${CMAKE_DISABLE_FIND_PACKAGE_Git}"
+            -P "${PROJECT_SOURCE_DIR}/cmake/ExfatResizeBuildVersion.cmake"
+        BYPRODUCTS ${exfat_resize_version_outputs}
+        VERBATIM
     )
 endif()
 
 function(exfat_resize_configure_target target)
     target_compile_features(${target} PRIVATE c_std_11)
     set_target_properties(${target} PROPERTIES C_EXTENSIONS OFF)
+
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /WX)
+    endif()
 
     if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(
@@ -74,6 +101,10 @@ function(exfat_resize_configure_target target)
                 -Wextra
                 -Wpedantic
         )
+
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
 
         if(EXFAT_RESIZE_ENABLE_SANITIZERS)
             target_compile_options(
@@ -107,13 +138,20 @@ endfunction()
 add_library(
     exfat_resize
     STATIC
+        lib/allocation.c
         lib/block_device.c
         lib/boot_region.c
         lib/checked_math.c
+        lib/directory.c
         lib/endian.c
+        lib/event.c
         lib/geometry.c
+        lib/grow.c
         lib/resize.c
         lib/sector_adapter.c
+        lib/shrink.c
+        lib/stream.c
+        lib/volume.c
 )
 add_library(exfat_resize::exfat_resize ALIAS exfat_resize)
 
@@ -137,6 +175,8 @@ if(EXFAT_RESIZE_BUILD_CLI)
             src/windows/device_path.c
             src/windows/entry.c
             src/windows/partition.c
+            src/windows/partition_layout.c
+            src/windows/partition_shrink.c
         )
     else()
         set(
@@ -151,18 +191,14 @@ if(EXFAT_RESIZE_BUILD_CLI)
         exfat-resize
         ${EXFAT_RESIZE_CLI_SOURCES}
     )
+    add_dependencies(exfat-resize exfat_resize_build_version)
 
     target_include_directories(
         exfat-resize
         PRIVATE
             ${PROJECT_SOURCE_DIR}/lib
             ${PROJECT_SOURCE_DIR}/src
-    )
-
-    target_compile_definitions(
-        exfat-resize
-        PRIVATE
-            EXFAT_RESIZE_BUILD_VERSION="${EXFAT_RESIZE_BUILD_VERSION}"
+            ${PROJECT_BINARY_DIR}
     )
 
     target_link_libraries(
@@ -176,16 +212,6 @@ if(EXFAT_RESIZE_BUILD_CLI)
     if(MINGW)
         target_link_options(exfat-resize PRIVATE -municode)
     endif()
-endif()
-
-set(EXFAT_RESIZE_INSTALL_MANPAGE OFF)
-if(EXFAT_RESIZE_BUILD_CLI AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    configure_file(
-        docs/exfat-resize.8.in
-        ${CMAKE_CURRENT_BINARY_DIR}/exfat-resize.8
-        @ONLY
-    )
-    set(EXFAT_RESIZE_INSTALL_MANPAGE ON)
 endif()
 
 configure_package_config_file(
@@ -258,6 +284,7 @@ foreach(exfat_resize_document_component IN ITEMS Runtime Development)
 
     install(
         FILES
+            docs/LIBRARY.md
             docs/PARTITIONING.md
             docs/TRANSACTION.md
         DESTINATION
